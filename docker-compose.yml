@@ -1,0 +1,47 @@
+services:
+  neutts-vulkan:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neutts-vulkan-server
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    devices:
+      # Pass GPU hardware nodes (Intel Arc / AMD Radeon) into container
+      - /dev/dri:/dev/dri
+    group_add:
+      # Grant access to /dev/dri render node (matches host 'render' group GID)
+      - "989"
+    volumes:
+      # Persist downloaded Hugging Face model weights on host
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      # Mount voices directory so new voices can be added without rebuilding
+      - ./voices:/app/voices
+      # Optional: Mount SSL certificates directory (read-only)
+      # - ./certs:/app/certs:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEFAULT_VOICE=aelita
+      # Optional: set API_KEY to require Bearer authentication on all /v1/* endpoints
+      # - API_KEY=your-secret-key
+      # Optional: configure CORS allowed origins (unset by default; set * or list origins)
+      # - CORS_ORIGINS=*
+      # - CORS_ORIGINS=http://localhost:3000,http://10.12.0.21:3000
+      # Optional SSL / HTTPS configuration:
+      # - SSL_KEYFILE=/app/certs/key.pem
+      # - SSL_CERTFILE=/app/certs/cert.pem
+      # - SSL_KEYFILE_PASSWORD=secret
+      # - SSL_CA_CERTS=/app/certs/ca.pem
+      # For Intel GPUs on Debian, uncomment if needed:
+      # - VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json
+      # For AMD GPUs on Debian, uncomment if needed:
+      # - VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f -k http://localhost:8090/api/status || curl -s -f -k https://localhost:8090/api/status || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,44 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Temporary audio artifacts
+*.wav
+*.mp3
+*.ogg
+*.opus
+*.flac
+*.aac
+
+# Voices volume: ignore generated/uploaded voices, keep directory structure & docs
+voices/*
+!voices/.gitkeep
+!voices/README.md
+
+# HuggingFace & model cache
+.cache/
+models/
+
+# OS & IDE
+.DS_Store
+.vscode/
+.idea/
+
+# SSL / TLS certificates & private keys
+certs/*
+!certs/.gitkeep
+!certs/README.md
+*.pem
+*.key
+*.crt
+*.cer
+*.pfx
+*.p12
+

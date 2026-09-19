@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NeuTTS Server — Voice Portal & Speech Engine</title>
+  <meta name="description" content="NeuTTS Server: Ultra-low-latency streaming text-to-speech engine and zero-shot voice cloning portal.">
+  <meta name="theme-color" content="#090d16">
+  <meta name="color-scheme" content="dark">
+  <meta property="og:title" content="NeuTTS Server — Voice Portal & Speech Engine">
+  <meta property="og:description" content="Ultra-low-latency streaming text-to-speech engine and zero-shot voice cloning portal.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NeuTTS Server">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%238b5cf6'/%3E%3Ctext y='70' x='50' text-anchor='middle' font-size='60' fill='white'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%238b5cf6'/%3E%3Ctext y='70' x='50' text-anchor='middle' font-size='60' fill='white'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: color-mix(in srgb, #161d2f 72%, transparent);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent: #8b5cf6;
+      --accent-hover: #7c3aed;
+      --accent-glow: color-mix(in srgb, var(--accent) 30%, transparent);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --success: #10b981;
+      --danger: #ef4444;
+      --radius: 12px;
+    }
+
+    /* Modern View Transitions API (Same-Document SPA) */
+
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 0.18s;
+      animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      ::view-transition-group(*),
+      ::view-transition-old(*),
+      ::view-transition-new(*) {
+        animation: none !important;
+      }
+    }
+
+    html {
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--accent) 40%, transparent) transparent;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--accent) 30%, transparent);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: color-mix(in srgb, var(--accent) 60%, transparent);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+      background-image: 
+        radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(59, 130, 246, 0.08) 0%, transparent 40%);
+    }
+
+    header {
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(9, 13, 22, 0.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #3b82f6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1.25rem;
+      box-shadow: 0 0 15px var(--accent-glow);
+    }
+
+    .logo-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .badges {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.28rem 0.65rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .badge-vulkan {
+      background: color-mix(in srgb, var(--accent) 20%, transparent);
+      color: #c4b5fd;
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+
+    .badge-btn {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .badge-btn:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .badge-online {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    main {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    nav.tabs {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 2rem;
+      padding-bottom: 0.5rem;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 0.55rem 1.1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .tab-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .tab-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .tab-btn.active {
+      color: var(--text);
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+
+    .tab-content {
+      display: none;
+      outline: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Container Queries for responsive catalog */
+    #voices-list {
+      container-type: inline-size;
+      container-name: voices-grid;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .card:hover {
+      border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+      box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.4);
+    }
+
+    /* CSS :has() selector */
+    .card:has(.btn-danger:hover) {
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    @container voices-grid (max-width: 440px) {
+      .card {
+        padding: 1.1rem;
+      }
+      .voice-actions {
+        flex-direction: column;
+      }
+    }
+
+    .voice-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .voice-id {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .voice-transcript {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      background: rgba(0, 0, 0, 0.28);
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 1rem;
+      max-height: 80px;
+      overflow-y: auto;
+      font-style: italic;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .voice-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    button.btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+    }
+
+    button.btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+      color: white;
+      box-shadow: 0 2px 10px var(--accent-glow);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      opacity: 0.95;
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.25);
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    /* CSS :has() selector on form groups */
+    .form-group:has(input:focus, textarea:focus, select:focus) label {
+      color: #c4b5fd;
+      transition: color 0.2s;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      color: var(--text-muted);
+    }
+
+    input[type="text"], input[type="password"], textarea, select {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="text"]:focus, input[type="password"]:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    /* CSS :user-invalid pseudo-class */
+    input:user-invalid, textarea:user-invalid {
+      border-color: rgba(239, 68, 68, 0.6);
+    }
+
+    .dropzone {
+      border: 2px dashed color-mix(in srgb, var(--accent) 35%, transparent);
+      border-radius: var(--radius);
+      padding: 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+    }
+
+    .telemetry {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--card-border);
+      font-size: 0.85rem;
+    }
+
+    .telemetry-item span {
+      font-weight: 700;
+      color: #c4b5fd;
+    }
+
+    #audio-visualizer {
+      width: 100%;
+      height: 64px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--card-border);
+      display: none;
+    }
+
+    audio {
+      width: 100%;
+      height: 42px;
+      outline: none;
+      border-radius: 8px;
+    }
+
+    .code-block-wrapper {
+      position: relative;
+      background: #050810;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+
+    .code-block-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 0.4rem 0.85rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text);
+      font-size: 0.75rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .copy-btn.copied {
+      background: rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+      border-color: rgba(16, 185, 129, 0.4);
+    }
+
+    .code-block {
+      padding: 1rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem;
+      overflow-x: auto;
+      color: #e2e8f0;
+      line-height: 1.45;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-muted);
+    }
+
+    .empty-state h3 {
+      font-size: 1.25rem;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+
+    /* Native Modal Dialogs & Top-Layer Transitions */
+    dialog {
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 1.75rem;
+      max-width: 480px;
+      width: 90vw;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 25px var(--accent-glow);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      margin: auto;
+      opacity: 0;
+      transform: scale(0.95) translateY(8px);
+      transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  overlay 0.2s allow-discrete,
+                  display 0.2s allow-discrete;
+    }
+
+    dialog[open] {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+
+    @starting-style {
+      dialog[open] {
+        opacity: 0;
+        transform: scale(0.95) translateY(8px);
+      }
+    }
+
+    dialog::backdrop {
+      background-color: rgba(0, 0, 0, 0);
+      backdrop-filter: blur(0px);
+      -webkit-backdrop-filter: blur(0px);
+      transition: background-color 0.2s ease, backdrop-filter 0.2s ease, overlay 0.2s allow-discrete, display 0.2s allow-discrete;
+    }
+
+    dialog[open]::backdrop {
+      background-color: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    @starting-style {
+      dialog[open]::backdrop {
+        background-color: rgba(0, 0, 0, 0);
+        backdrop-filter: blur(0px);
+        -webkit-backdrop-filter: blur(0px);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      dialog, dialog::backdrop {
+        transition-duration: 0.05s;
+        transform: none;
+      }
+      @starting-style {
+        dialog[open] {
+          transform: none;
+        }
+      }
+    }
+
+    .dialog-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .dialog-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+
+    #toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      z-index: 1000;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.3s ease;
+      pointer-events: none;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    #toast.success {
+      background: var(--success);
+      color: #fff;
+    }
+
+    #toast.error {
+      background: var(--danger);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <div class="logo-title">NeuTTS Server</div>
+        <div style="font-size: 0.75rem; color: var(--text-muted);">OpenAI-Compatible Streaming Voice Engine</div>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="badge badge-vulkan">Vulkan Engine</span>
+      <span id="auth-badge" class="badge" style="display: none; background: rgba(239, 68, 68, 0.2); color: #fca5a5;">🔒 Auth Required</span>
+      <button class="badge badge-btn" onclick="openApiKeyDialog()" aria-label="Configure API Key">🔑 API Key</button>
+      <span class="badge badge-online"><span class="dot"></span> Online</span>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs" role="tablist" aria-label="Portal Navigation">
+      <button id="tab-btn-voices" class="tab-btn active" role="tab" aria-selected="true" aria-controls="tab-voices" data-tab="voices" onclick="switchTab('voices')">🎙️ Voices Catalog</button>
+      <button id="tab-btn-clone" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-clone" data-tab="clone" onclick="switchTab('clone')">✨ Clone & Add Voice</button>
+      <button id="tab-btn-playground" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-playground" data-tab="playground" onclick="switchTab('playground')">🎧 Speech Playground</button>
+      <button id="tab-btn-api" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-api" data-tab="api" onclick="switchTab('api')">🔌 API & Integration</button>
+    </nav>
+
+    <!-- Tab 1: Voices Catalog -->
+    <section id="tab-voices" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-voices" tabindex="-1">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2>Installed Voice Clones</h2>
+        <button class="btn btn-secondary" onclick="loadVoices()">🔄 Refresh</button>
+      </div>
+      <div id="voices-list" class="grid">
+        <div class="empty-state" style="grid-column: 1 / -1;">Loading voices...</div>
+      </div>
+    </section>
+
+    <!-- Tab 2: Clone & Add Voice -->
+    <section id="tab-clone" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-clone" tabindex="-1" hidden>
+      <div class="card" style="max-width: 650px; margin: 0 auto;">
+        <h2 style="margin-bottom: 1rem;">Clone a New Voice</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+          Upload a clean 3–10 second speech audio clip and its exact transcript. The backend will pre-encode the voice reference tokens directly into your persistent voices volume with zero restart required.
+        </p>
+
+        <form id="clone-form" onsubmit="event.preventDefault(); handleCloneVoice(event); return false;">
+          <div class="form-group">
+            <label for="voice-name">Voice ID / Name</label>
+            <input type="text" id="voice-name" placeholder="e.g. aelita, narrator, david" required pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, dashes and underscores only." autocapitalize="none" autocorrect="off" spellcheck="false">
+          </div>
+
+          <div class="form-group">
+            <label for="audio-file">Reference Audio File (WAV, MP3, OGG, FLAC)</label>
+            <div id="dropzone" class="dropzone" onclick="document.getElementById('audio-file').click()">
+              <p id="file-label">📁 Click or Drag & Drop audio file here</p>
+              <input type="file" id="audio-file" accept="audio/*" style="display: none;" onchange="handleFileSelected(event)" required>
+            </div>
+            <audio id="audio-preview" controls style="display: none; margin-top: 0.75rem;"></audio>
+          </div>
+
+          <div class="form-group">
+            <label for="voice-text">Exact Reference Transcript</label>
+            <textarea id="voice-text" rows="3" placeholder="Type or paste the exact spoken words in the audio clip..." required></textarea>
+          </div>
+
+          <button type="button" id="clone-btn" class="btn btn-primary" style="width: 100%;" onclick="handleCloneVoice(event)">
+            ⚡ Encode & Register Voice
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Tab 3: Speech Playground -->
+    <section id="tab-playground" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-playground" tabindex="-1" hidden>
+      <div class="card" style="max-width: 750px; margin: 0 auto;">
+        <h2 style="margin-bottom: 1rem;">Speech Synthesis Playground</h2>
+        
+        <div class="form-group">
+          <label for="play-voice">Select Voice</label>
+          <select id="play-voice" required></select>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <label for="play-text">Text to Synthesize</label>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Shortcut: <kbd style="background: rgba(255,255,255,0.08); padding: 0.1rem 0.35rem; border-radius: 4px;">Ctrl</kbd> + <kbd style="background: rgba(255,255,255,0.08); padding: 0.1rem 0.35rem; border-radius: 4px;">Enter</kbd></span>
+          </div>
+          <textarea id="play-text" rows="4" placeholder="Enter text to synthesize...">Streaming speech synthesis is now active, delivering low-latency audio directly from the Vulkan GPU engine.</textarea>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+          <div>
+            <label for="play-format">Response Format</label>
+            <select id="play-format">
+              <option value="mp3" selected>MP3 Audio (128 kbps)</option>
+              <option value="opus">Opus Audio (96 kbps)</option>
+              <option value="wav">WAV Audio (24 kHz PCM)</option>
+              <option value="pcm">Raw PCM (24 kHz 16-bit)</option>
+            </select>
+          </div>
+          <div>
+            <label for="play-stream">Delivery Mode</label>
+            <select id="play-stream">
+              <option value="stream" selected>⚡ Live Stream (Chunked)</option>
+              <option value="batch">📦 Full Batch Audio</option>
+            </select>
+          </div>
+          <div>
+            <label for="play-speed">Playback Speed</label>
+            <select id="play-speed">
+              <option value="0.5">0.5x (Slow)</option>
+              <option value="0.75">0.75x</option>
+              <option value="1.0" selected>1.0x (Normal)</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2.0">2.0x (Fast)</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="synth-btn" class="btn btn-primary" style="width: 100%;" onclick="handleSynthesize()">
+          ▶️ Generate & Play Speech
+        </button>
+
+        <div id="player-container" style="display: none; margin-top: 1.25rem; flex-direction: column; gap: 0.75rem;">
+          <canvas id="audio-visualizer"></canvas>
+          <audio id="playground-audio" controls style="width: 100%;"></audio>
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <a id="download-audio-link" class="btn btn-secondary" style="flex: 1; text-align: center; text-decoration: none; padding: 0.5rem;" download="speech.mp3">⬇️ Download Audio</a>
+            <button id="share-audio-btn" class="btn btn-secondary" style="flex: 1; display: none;" onclick="handleShareAudio()">🔗 Share Audio</button>
+          </div>
+        </div>
+
+        <div id="playground-telemetry" class="telemetry" style="display: none;">
+          <div class="telemetry-item">TTFB: <span id="stat-ttfb">0.00s</span></div>
+          <div class="telemetry-item">Total Time: <span id="stat-total">0.00s</span></div>
+          <div class="telemetry-item">Audio Duration: <span id="stat-dur">0.00s</span></div>
+          <div class="telemetry-item">RTF: <span id="stat-rtf">0.00x</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 4: API & Integration -->
+    <section id="tab-api" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-api" tabindex="-1" hidden>
+      <div class="card" style="max-width: 850px; margin: 0 auto;">
+        <h2>OpenAI-Compatible Integration</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+          This server provides a drop-in replacement for the OpenAI Audio Speech API (<code>POST /v1/audio/speech</code>).
+        </p>
+
+        <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Hermes Agent Configuration (<code>config.yaml</code>)</h3>
+        <div class="code-block-wrapper">
+          <div class="code-block-header">
+            <span>yaml</span>
+            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy YAML snippet">📋 Copy</button>
+          </div>
+          <pre class="code-block"><code>tts:
+  provider: openai
+  openai:
+    base_url: "http://&lt;HOST_IP&gt;:8090/v1"
+    api_key: "local-neutts"
+    model: "neutts"
+    voice: "aelita"
+  use_gateway: false</code></pre>
+        </div>
+
+        <h3 style="font-size: 1rem; margin: 1.5rem 0 0.5rem;">Curl Streaming Command</h3>
+        <div class="code-block-wrapper">
+          <div class="code-block-header">
+            <span>bash</span>
+            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy curl snippet">📋 Copy</button>
+          </div>
+          <pre class="code-block"><code>curl -s -N -X POST http://localhost:8090/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "Hello! Testing live streaming audio.",
+    "response_format": "mp3",
+    "stream": true
+  }' | mpv --no-terminal -</code></pre>
+        </div>
+
+        <h3 style="font-size: 1rem; margin: 1.5rem 0 0.5rem;">Python OpenAI SDK</h3>
+        <div class="code-block-wrapper">
+          <div class="code-block-header">
+            <span>python</span>
+            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy Python snippet">📋 Copy</button>
+          </div>
+          <pre class="code-block"><code>from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8090/v1", api_key="local")
+
+with client.audio.speech.with_streaming_response.create(
+    model="neutts",
+    voice="aelita",
+    input="Hello from Python SDK.",
+    response_format="pcm"
+) as response:
+    for chunk in response.iter_bytes():
+        # Process raw 24kHz 16-bit PCM chunk
+        pass</code></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modern Accessible Dialog: API Key Settings -->
+  <dialog id="api-key-dialog" closedby="any" aria-labelledby="api-key-dialog-title">
+    <div class="dialog-header">
+      <div id="api-key-dialog-title" class="dialog-title">🔑 API Authentication Key</div>
+      <button class="badge badge-btn" style="padding: 0.2rem 0.5rem;" onclick="document.getElementById('api-key-dialog').close()" aria-label="Close dialog">✕</button>
+    </div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+      Configure the Bearer API token used for requests from this browser. Stored securely in your client local storage.
+    </p>
+    <div class="form-group">
+      <label for="api-key-input">Bearer Token / Secret Key</label>
+      <input type="password" id="api-key-input" placeholder="Enter API Key (leave empty for unauthenticated)..." autocomplete="off">
+      <div style="display: flex; justify-content: flex-end; margin-top: 0.4rem;">
+        <button type="button" style="background: none; border: none; color: #c4b5fd; font-size: 0.75rem; cursor: pointer;" onclick="toggleApiKeyVisibility()">👁️ Toggle Visibility</button>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-secondary" onclick="clearApiKey()">Clear</button>
+      <button type="button" class="btn btn-primary" onclick="saveApiKey()">Save Key</button>
+    </div>
+  </dialog>
+
+  <!-- Modern Accessible Dialog: Confirm Action -->
+  <dialog id="confirm-dialog" closedby="any" aria-labelledby="confirm-dialog-title">
+    <div class="dialog-header">
+      <div id="confirm-dialog-title" class="dialog-title">Confirm Action</div>
+      <button class="badge badge-btn" style="padding: 0.2rem 0.5rem;" onclick="document.getElementById('confirm-dialog').close()" aria-label="Close dialog">✕</button>
+    </div>
+    <p id="confirm-dialog-message" style="font-size: 0.9rem; color: var(--text); margin-bottom: 1.5rem;"></p>
+    <div class="dialog-actions">
+      <button type="button" id="confirm-dialog-cancel-btn" class="btn btn-secondary">Cancel</button>
+      <button type="button" id="confirm-dialog-confirm-btn" class="btn btn-danger">Confirm</button>
+    </div>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    let installedVoices = [];
+    let lastSynthesizedBlob = null;
+    let audioCtx = null;
+    let analyser = null;
+    let audioSourceConnected = false;
+    let animFrameId = null;
+
+    // --- Toast Notifications ---
+    function showToast(msg, type = 'success') {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = `show ${type}`;
+      setTimeout(() => toast.className = '', 3500);
+    }
+
+    // --- Modern View Transitions & Routing ---
+    function switchTab(tabId, updateHash = true) {
+      if (!['voices', 'clone', 'playground', 'api'].includes(tabId)) {
+        tabId = 'voices';
+      }
+
+      // Synchronize URL hash for deep linking and history navigation
+      if (updateHash && window.location.hash !== `#${tabId}`) {
+        window.location.hash = `#${tabId}`;
+        return;
+      }
+
+      const updateDOM = () => {
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+          const isActive = btn.dataset.tab === tabId;
+          btn.classList.toggle('active', isActive);
+          btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+
+        document.querySelectorAll('.tab-content').forEach(section => {
+          const isActive = section.id === `tab-${tabId}`;
+          section.classList.toggle('active', isActive);
+          if (isActive) {
+            section.removeAttribute('hidden');
+          } else {
+            section.setAttribute('hidden', '');
+          }
+        });
+      };
+
+      const finalizeTab = () => {
+        document.getElementById(`tab-${tabId}`)?.focus();
+        if (tabId === 'voices' || tabId === 'playground') loadVoices();
+      };
+
+      // Progressive Enhancement with View Transitions API
+      if (!document.startViewTransition) {
+        updateDOM();
+        finalizeTab();
+        return;
+      }
+
+      try {
+        const transition = document.startViewTransition(() => {
+          updateDOM();
+        });
+
+        if (transition.ready) transition.ready.catch(() => {});
+        transition.finished.catch(() => {}).finally(() => {
+          finalizeTab();
+        });
+      } catch (err) {
+        updateDOM();
+        finalizeTab();
+      }
+    }
+
+    // Tab Keyboard Navigation (Arrow keys & Home/End)
+    const tabList = document.querySelector('[role="tablist"]');
+    if (tabList) {
+      tabList.addEventListener('keydown', (e) => {
+        const tabs = Array.from(tabList.querySelectorAll('[role="tab"]'));
+        const index = tabs.indexOf(document.activeElement);
+        if (index === -1) return;
+
+        let nextIndex = index;
+        if (e.key === 'ArrowRight') {
+          nextIndex = (index + 1) % tabs.length;
+        } else if (e.key === 'ArrowLeft') {
+          nextIndex = (index - 1 + tabs.length) % tabs.length;
+        } else if (e.key === 'Home') {
+          nextIndex = 0;
+        } else if (e.key === 'End') {
+          nextIndex = tabs.length - 1;
+        } else {
+          return;
+        }
+        e.preventDefault();
+        tabs[nextIndex].focus();
+        tabs[nextIndex].click();
+      });
+    }
+
+    // --- HTML Escaping ---
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // --- Authentication & Headers ---
+    function getAuthHeaders(extraHeaders = {}) {
+      const apiKey = (localStorage.getItem('neutts_api_key') || '').trim().replace(/[\r\n]/g, '');
+      const headers = { ...extraHeaders };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+      return headers;
+    }
+
+    function openApiKeyDialog() {
+      const dialog = document.getElementById('api-key-dialog');
+      const input = document.getElementById('api-key-input');
+      input.value = localStorage.getItem('neutts_api_key') || '';
+      input.type = 'password';
+      dialog.showModal();
+    }
+
+    function toggleApiKeyVisibility() {
+      const input = document.getElementById('api-key-input');
+      input.type = input.type === 'password' ? 'text' : 'password';
+    }
+
+    function saveApiKey() {
+      const input = document.getElementById('api-key-input');
+      const key = input.value.trim();
+      if (key) {
+        localStorage.setItem('neutts_api_key', key);
+        showToast('API Key saved to browser storage.');
+      } else {
+        localStorage.removeItem('neutts_api_key');
+        showToast('API Key cleared.');
+      }
+      document.getElementById('api-key-dialog').close();
+      loadVoices();
+    }
+
+    function clearApiKey() {
+      localStorage.removeItem('neutts_api_key');
+      document.getElementById('api-key-input').value = '';
+      showToast('API Key cleared.');
+      document.getElementById('api-key-dialog').close();
+      loadVoices();
+    }
+
+    // Asynchronous Modal Confirmation
+    function openConfirmDialog(title, message) {
+      return new Promise((resolve) => {
+        const dialog = document.getElementById('confirm-dialog');
+        document.getElementById('confirm-dialog-title').textContent = title;
+        document.getElementById('confirm-dialog-message').textContent = message;
+        
+        const confirmBtn = document.getElementById('confirm-dialog-confirm-btn');
+        const cancelBtn = document.getElementById('confirm-dialog-cancel-btn');
+
+        const onConfirm = () => {
+          cleanup();
+          dialog.close();
+          resolve(true);
+        };
+
+        const onCancel = () => {
+          cleanup();
+          dialog.close();
+          resolve(false);
+        };
+
+        const onClose = () => {
+          cleanup();
+          resolve(false);
+        };
+
+        function cleanup() {
+          confirmBtn.removeEventListener('click', onConfirm);
+          cancelBtn.removeEventListener('click', onCancel);
+          dialog.removeEventListener('close', onClose);
+        }
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        dialog.addEventListener('close', onClose, { once: true });
+
+        dialog.showModal();
+      });
+    }
+
+    // Declarative light-dismiss fallback for browsers without native closedby support
+    document.querySelectorAll('dialog[closedby="any"]').forEach(dialog => {
+      if (!('closedBy' in HTMLDialogElement.prototype)) {
+        dialog.addEventListener('click', (event) => {
+          if (event.target !== dialog) return;
+          const rect = dialog.getBoundingClientRect();
+          const isContent = (
+            rect.top <= event.clientY && event.clientY <= rect.top + rect.height &&
+            rect.left <= event.clientX && event.clientX <= rect.left + rect.width
+          );
+          if (!isContent) dialog.close();
+        });
+      }
+    });
+
+    // --- Server Status ---
+    async function checkServerStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.auth_required) {
+          const authBadge = document.getElementById('auth-badge');
+          if (authBadge) authBadge.style.display = 'inline-flex';
+        }
+      } catch (e) {}
+    }
+
+    // --- Voices Catalog ---
+    async function loadVoices() {
+      const listEl = document.getElementById('voices-list');
+      const selectEl = document.getElementById('play-voice');
+      try {
+        const res = await fetch('/v1/audio/voices', { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error?.message || data.detail || 'Failed to load voices');
+        }
+        installedVoices = data.voices || [];
+
+        if (installedVoices.length === 0) {
+          listEl.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+              <h3>No Voices Installed</h3>
+              <p>Go to the <strong>Clone & Add Voice</strong> tab to upload your first voice sample!</p>
+            </div>`;
+          selectEl.innerHTML = '<option value="">No voices available (Upload one first)</option>';
+          return;
+        }
+
+        listEl.innerHTML = installedVoices.map(v => `
+          <div class="card">
+            <div class="voice-card-header">
+              <div class="voice-id">🗣️ ${escapeHtml(v.name)}</div>
+              <span class="badge badge-vulkan">${v.size_bytes ? (v.size_bytes / 1024).toFixed(1) + ' KB' : 'Active'}</span>
+            </div>
+            <div class="voice-transcript">"${escapeHtml(v.transcript || 'No transcript available')}"</div>
+            <div class="voice-actions">
+              <button class="btn btn-secondary test-voice-btn" data-voice-id="${escapeHtml(v.id)}">🎧 Test Voice</button>
+              <button class="btn btn-danger delete-voice-btn" data-voice-id="${escapeHtml(v.id)}">🗑️ Delete</button>
+            </div>
+          </div>
+        `).join('');
+
+        selectEl.innerHTML = installedVoices.map(v => `
+          <option value="${escapeHtml(v.id)}">${escapeHtml(v.name)} (${escapeHtml(v.id)})</option>
+        `).join('');
+
+      } catch (err) {
+        listEl.innerHTML = `<div class="empty-state" style="color: var(--danger);">Failed to load voices: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    // Event delegation for voice actions (avoids inline JS context-confusion XSS)
+    const voicesListContainer = document.getElementById('voices-list');
+    if (voicesListContainer) {
+      voicesListContainer.addEventListener('click', (e) => {
+        const testBtn = e.target.closest('.test-voice-btn');
+        if (testBtn && testBtn.dataset.voiceId) {
+          useVoiceInPlayground(testBtn.dataset.voiceId);
+          return;
+        }
+        const delBtn = e.target.closest('.delete-voice-btn');
+        if (delBtn && delBtn.dataset.voiceId) {
+          deleteVoice(delBtn.dataset.voiceId);
+          return;
+        }
+      });
+    }
+
+    function useVoiceInPlayground(voiceId) {
+      document.getElementById('play-voice').value = voiceId;
+      switchTab('playground');
+    }
+
+    async function deleteVoice(voiceId) {
+      const confirmed = await openConfirmDialog(
+        'Delete Voice Clone',
+        `Are you sure you want to permanently delete voice "${voiceId}" from the server?`
+      );
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`/v1/audio/voices/${encodeURIComponent(voiceId)}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || data.detail || 'Failed to delete');
+        showToast(`Voice "${voiceId}" deleted.`);
+        loadVoices();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // --- Clone Voice ---
+    function handleFileSelected(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!file.type.startsWith('audio/') && !/\.(wav|mp3|ogg|flac|aac|m4a)$/i.test(file.name)) {
+        showToast('Please select a valid audio file (WAV, MP3, OGG, FLAC)', 'error');
+        e.target.value = '';
+        return;
+      }
+      document.getElementById('file-label').textContent = `🎵 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      
+      const preview = document.getElementById('audio-preview');
+      if (preview.src && preview.src.startsWith('blob:')) {
+        URL.revokeObjectURL(preview.src);
+      }
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+
+      const nameInput = document.getElementById('voice-name');
+      if (!nameInput.value) {
+        nameInput.value = file.name.replace(/\.[^/.]+$/, "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      }
+    }
+
+    async function handleCloneVoice(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      const btn = document.getElementById('clone-btn');
+      const name = document.getElementById('voice-name').value.trim();
+      const text = document.getElementById('voice-text').value.trim();
+      const fileInput = document.getElementById('audio-file');
+
+      if (!name) {
+        showToast("Please enter a Voice ID / Name.", 'error');
+        document.getElementById('voice-name').focus();
+        return;
+      }
+      if (!fileInput.files[0]) {
+        showToast("Please select an audio file.", 'error');
+        return;
+      }
+      if (!text) {
+        showToast("Please enter the reference transcript.", 'error');
+        document.getElementById('voice-text').focus();
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "⏳ Encoding audio tokens (NeuCodec)...";
+
+      const formData = new FormData();
+      formData.append('name', name);
+      formData.append('text', text);
+      formData.append('audio_file', fileInput.files[0]);
+
+      try {
+        const res = await fetch('/v1/audio/voices', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || data.detail || 'Failed to clone voice');
+
+        showToast(`Voice "${name}" successfully encoded and saved!`);
+        document.getElementById('clone-form').reset();
+        const preview = document.getElementById('audio-preview');
+        if (preview.src) {
+          URL.revokeObjectURL(preview.src);
+          preview.removeAttribute('src');
+        }
+        preview.style.display = 'none';
+        document.getElementById('file-label').textContent = "📁 Click or Drag & Drop audio file here";
+        switchTab('voices');
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "⚡ Encode & Register Voice";
+      }
+    }
+
+    // --- Web Audio Visualizer ---
+    function initVisualizer(audioEl) {
+      if (audioSourceConnected) return;
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        audioCtx = new AudioContextClass();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 128;
+        analyser.smoothingTimeConstant = 0.75;
+        
+        const source = audioCtx.createMediaElementSource(audioEl);
+        source.connect(analyser);
+        analyser.connect(audioCtx.destination);
+        audioSourceConnected = true;
+      } catch (err) {
+        console.warn('Web Audio API visualizer init notice:', err);
+      }
+    }
+
+    function startVisualizer() {
+      const canvas = document.getElementById('audio-visualizer');
+      if (!canvas || !analyser) return;
+      canvas.style.display = 'block';
+
+      const ctx = canvas.getContext('2d');
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+      }
+
+      function draw() {
+        animFrameId = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const barWidth = (w / bufferLength) * 2.2;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const barHeight = (dataArray[i] / 255) * h * 0.9;
+
+          const gradient = ctx.createLinearGradient(0, h, 0, h - barHeight);
+          gradient.addColorStop(0, 'rgba(139, 92, 246, 0.35)');
+          gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.85)');
+          gradient.addColorStop(1, 'rgba(56, 189, 248, 0.95)');
+
+          ctx.fillStyle = gradient;
+          ctx.fillRect(x, h - barHeight, Math.max(1, barWidth - (2 * dpr)), barHeight);
+
+          x += barWidth;
+          if (x > w) break;
+        }
+      }
+
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      draw();
+    }
+
+    function stopVisualizer() {
+      if (animFrameId) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+      }
+      const canvas = document.getElementById('audio-visualizer');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    // --- Speech Synthesis & Playground ---
+    async function handleSynthesize() {
+      const voice = document.getElementById('play-voice').value;
+      const text = document.getElementById('play-text').value.trim();
+      const format = document.getElementById('play-format').value;
+      const stream = document.getElementById('play-stream').value === 'stream';
+      const btn = document.getElementById('synth-btn');
+      const audioEl = document.getElementById('playground-audio');
+      const teleEl = document.getElementById('playground-telemetry');
+
+      if (!voice) {
+        showToast("Please select a voice clone first.", 'error');
+        return;
+      }
+      if (!text) {
+        showToast("Please enter text to synthesize.", 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "⏳ Synthesizing on GPU...";
+      teleEl.style.display = 'none';
+
+      const speed = parseFloat(document.getElementById('play-speed').value) || 1.0;
+      const t0 = performance.now();
+
+      try {
+        const res = await fetch('/v1/audio/speech', {
+          method: 'POST',
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            model: "tts-1",
+            voice: voice,
+            input: text,
+            response_format: format === 'pcm' ? 'wav' : format, // Browser audio element requires WAV container
+            speed: speed,
+            stream: stream
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error?.message || err.detail || 'Synthesis failed');
+        }
+
+        const ttfb = ((performance.now() - t0) / 1000).toFixed(2);
+        const blob = await res.blob();
+        lastSynthesizedBlob = blob;
+        const total = ((performance.now() - t0) / 1000).toFixed(2);
+
+        const playerContainer = document.getElementById('player-container');
+        const dlBtn = document.getElementById('download-audio-link');
+        const shareBtn = document.getElementById('share-audio-btn');
+        const audioUrl = URL.createObjectURL(blob);
+
+        initVisualizer(audioEl);
+
+        if (audioEl.src && audioEl.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audioEl.src);
+        }
+        audioEl.src = audioUrl;
+        audioEl.style.display = 'block';
+        if (playerContainer) playerContainer.style.display = 'flex';
+        
+        if (dlBtn) {
+          const safeVoice = (voice || 'voice').replace(/[^a-zA-Z0-9_\-]/g, '_');
+          dlBtn.href = audioUrl;
+          dlBtn.download = `speech_${safeVoice}_${Date.now()}.${format === 'pcm' ? 'wav' : format}`;
+        }
+
+        // Web Share API support detection
+        if (shareBtn && navigator.share) {
+          shareBtn.style.display = 'inline-flex';
+        }
+
+        // Native Media Session API integration
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: text.length > 50 ? text.slice(0, 47) + '...' : text,
+            artist: `NeuTTS Server (${voice})`,
+            album: 'NeuTTS Speech Engine',
+            artwork: [
+              { src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%238b5cf6'/%3E%3Ctext y='70' x='50' text-anchor='middle' font-size='60' fill='white'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E", sizes: '100x100', type: 'image/svg+xml' }
+            ]
+          });
+          navigator.mediaSession.setActionHandler('play', () => audioEl.play());
+          navigator.mediaSession.setActionHandler('pause', () => audioEl.pause());
+          navigator.mediaSession.setActionHandler('seekbackward', () => { audioEl.currentTime = Math.max(audioEl.currentTime - 5, 0); });
+          navigator.mediaSession.setActionHandler('seekforward', () => { audioEl.currentTime = Math.min(audioEl.currentTime + 5, audioEl.duration); });
+        }
+
+        // Resume AudioContext if suspended
+        if (audioCtx && audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+
+        audioEl.play().catch(() => {});
+
+        audioEl.onloadedmetadata = () => {
+          const dur = audioEl.duration.toFixed(2);
+          const rtf = (total / audioEl.duration).toFixed(2);
+          document.getElementById('stat-ttfb').textContent = `${ttfb}s`;
+          document.getElementById('stat-total').textContent = `${total}s`;
+          document.getElementById('stat-dur').textContent = `${dur}s`;
+          document.getElementById('stat-rtf').textContent = `${rtf}x`;
+          teleEl.style.display = 'flex';
+        };
+
+        showToast("Speech synthesized successfully!");
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "▶️ Generate & Play Speech";
+      }
+    }
+
+    // Audio Visualizer Event Listeners
+    const playgroundAudio = document.getElementById('playground-audio');
+    if (playgroundAudio) {
+      playgroundAudio.addEventListener('play', async () => {
+        if (audioCtx && audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+        startVisualizer();
+      });
+      playgroundAudio.addEventListener('pause', stopVisualizer);
+      playgroundAudio.addEventListener('ended', stopVisualizer);
+    }
+
+    // --- Web Share API ---
+    async function handleShareAudio() {
+      if (!lastSynthesizedBlob) return;
+      const voice = document.getElementById('play-voice').value || 'voice';
+      const format = document.getElementById('play-format').value;
+      const ext = format === 'pcm' ? 'wav' : format;
+      const mime = ext === 'wav' ? 'audio/wav' : (ext === 'opus' ? 'audio/ogg' : 'audio/mpeg');
+      const file = new File([lastSynthesizedBlob], `speech_${voice}.${ext}`, { type: mime });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            title: `NeuTTS Speech (${voice})`,
+            text: document.getElementById('play-text').value.slice(0, 100),
+            files: [file]
+          });
+          showToast("Audio shared successfully!");
+        } catch (e) {
+          if (e.name !== 'AbortError') showToast("Could not share: " + e.message, 'error');
+        }
+      } else if (navigator.share) {
+        try {
+          await navigator.share({
+            title: `NeuTTS Speech (${voice})`,
+            text: document.getElementById('play-text').value.slice(0, 100),
+            url: window.location.href
+          });
+        } catch (e) {
+          if (e.name !== 'AbortError') showToast("Could not share: " + e.message, 'error');
+        }
+      } else {
+        showToast("Sharing is not supported on this device/browser.", 'error');
+      }
+    }
+
+    // --- Modern Async Clipboard API ---
+    async function copyCode(button) {
+      const wrapper = button.closest('.code-block-wrapper');
+      const code = wrapper.querySelector('code')?.innerText || '';
+      try {
+        await navigator.clipboard.writeText(code);
+        const originalText = button.textContent;
+        button.textContent = '✓ Copied!';
+        button.classList.add('copied');
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.classList.remove('copied');
+        }, 2000);
+      } catch (err) {
+        showToast('Failed to copy to clipboard', 'error');
+      }
+    }
+
+    // --- Keyboard Shortcut (Ctrl/Cmd + Enter) to Synthesize ---
+    const playTextArea = document.getElementById('play-text');
+    if (playTextArea) {
+      playTextArea.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          handleSynthesize();
+        }
+      });
+    }
+
+    // --- Drag and Drop File Upload ---
+    const dropzone = document.getElementById('dropzone');
+    ['dragenter', 'dragover'].forEach(name => {
+      dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(name => {
+      dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); });
+    });
+    dropzone.addEventListener('drop', (e) => {
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        document.getElementById('audio-file').files = files;
+        handleFileSelected({ target: { files: files } });
+      }
+    });
+
+    // --- Browser History & Navigation Sync ---
+    window.addEventListener('hashchange', () => {
+      const hash = window.location.hash.slice(1);
+      switchTab(hash, false);
+    });
+
+    // --- Initial Load ---
+    const initialHash = window.location.hash.slice(1);
+    if (['voices', 'clone', 'playground', 'api'].includes(initialHash)) {
+      switchTab(initialHash, false);
+    } else {
+      switchTab('voices', false);
+    }
+    checkServerStatus();
+  </script>
+</body>
+</html>

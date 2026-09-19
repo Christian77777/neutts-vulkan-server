@@ -1,0 +1,44 @@
+services:
+  neutts-vulkan:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neutts-vulkan-server
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ./voices:/app/voices
+      # Optional: Mount SSL certificates directory (read-only)
+      # - ./certs:/app/certs:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEFAULT_VOICE=aelita
+      # Optional: set API_KEY to require Bearer authentication on all /v1/* endpoints
+      # - API_KEY=your-secret-key
+      # Optional: configure CORS allowed origins (unset by default; set * or list origins)
+      # - CORS_ORIGINS=*
+      # - CORS_ORIGINS=http://localhost:3000,http://10.12.0.21:3000
+      # Optional SSL / HTTPS configuration:
+      # - SSL_KEYFILE=/app/certs/key.pem
+      # - SSL_CERTFILE=/app/certs/cert.pem
+      # - SSL_KEYFILE_PASSWORD=secret
+      # - SSL_CA_CERTS=/app/certs/ca.pem
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - NVIDIA_VISIBLE_DEVICES=all
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f -k http://localhost:8090/api/status || curl -s -f -k https://localhost:8090/api/status || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
