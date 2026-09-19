@@ -7,6 +7,9 @@ services:
     restart: unless-stopped
     ports:
       - "8090:8090"
+      # Native Wyoming protocol port for Home Assistant (uncomment to expose)
+      # WARNING: Wyoming protocol is UNAUTHENTICATED. Keep restricted to your internal LAN/Docker network.
+      # - "10200:10200"
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
       - ./voices:/app/voices
@@ -15,6 +18,13 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DEFAULT_VOICE=aelita
+      # Home Assistant Wyoming Protocol Toggle:
+      # Set to 'true' to enable the Wyoming TTS server (default: false).
+      # SECURITY WARNING: Wyoming protocol does NOT support authentication or API keys.
+      # Any client reaching port 10200 can synthesize audio. Do NOT expose to public internet.
+      # - ENABLE_WYOMING=true
+      # - WYOMING_PORT=10200
+      # - WYOMING_HOST=0.0.0.0
       # Optional: set API_KEY to require Bearer authentication on all /v1/* endpoints
       # - API_KEY=your-secret-key
       # Optional: configure CORS allowed origins (unset by default; set * or list origins)

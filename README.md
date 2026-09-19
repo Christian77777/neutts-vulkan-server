@@ -17,6 +17,7 @@ Supports zero-shot voice cloning with 8-bit quantization (`neuphonic/neutts-air-
 - **Persistent Storage:** Voices persist across container restarts via host-mounted `./voices:/app/voices`.
 - **Security Features:** Optional Bearer token authentication (`API_KEY`), configurable CORS origins, and security headers (CSP, HSTS, X-Frame-Options).
 - **SSL / TLS Support:** Direct HTTPS support with certificates (`SSL_CERTFILE` & `SSL_KEYFILE`), automatic HSTS, and dual HTTP/HTTPS healthchecks.
+- **Home Assistant Wyoming Protocol:** Native TCP streaming TTS on port `10200` for Home Assistant's local Assist voice pipeline and satellites (toggleable via `ENABLE_WYOMING=true`).
 
 ---
 
@@ -211,18 +212,63 @@ docker compose up -d
 
 ---
 
-## Available Endpoints
+## Home Assistant Integration (Wyoming Protocol)
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/` | Web Management Portal UI |
-| `GET` | `/v1/models` | List models (`tts-1`, `tts-1-hd`, `neutts`) for client discovery |
-| `GET` | `/v1/audio/voices` | List installed voices and transcripts |
-| `POST` | `/v1/audio/voices` | Upload and encode a reference voice sample (`multipart/form-data`) |
-| `DELETE` | `/v1/audio/voices/{voice_id}` | Delete a voice clone from the persistent volume |
-| `POST` | `/v1/audio/speech` | Speech synthesis endpoint (Streaming & Batch) |
-| `POST` | `/audio/speech` | Alias for speech synthesis |
-| `GET` | `/api/status` | Server status, backend device, and capability flags |
+The server includes native support for the **Wyoming protocol**, allowing Home Assistant to use NeuTTS as the Text-to-Speech (TTS) engine for [Local Voice Assistants (Assist pipelines)](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/#installing-a-local-assist-pipeline) and voice satellites (such as ESP32-S3-BOX, Raspberry Pi satellites, or Home Assistant Voice PE).
+
+### Why Wyoming?
+* **Sub-second Time-To-First-Audio (TTFA):** Audio begins streaming directly to voice satellites while the sentence is still being generated.
+* **Zero Transcoding Overhead:** Directly transmits raw 24 kHz 16-bit mono PCM chunks over TCP without requiring FFmpeg MP3 encoding/decoding.
+* **Native HA Integration:** Appears directly under Home Assistant's native Voice Assistant settings without needing custom HACS integrations.
+
+> [!NOTE]
+> **Authentication:** The Wyoming protocol is unauthenticated by design and does not support API keys. Port `10200` should only be accessible within your trusted local network.
+
+### 1. Enable Wyoming in `docker-compose.yml`
+
+Uncomment the port mapping and set `ENABLE_WYOMING=true`:
+
+```yaml
+services:
+  neutts-vulkan:
+    ports:
+      - "8090:8090"      # OpenAI HTTP API & Web Management Portal
+      - "10200:10200"    # Wyoming Protocol (Home Assistant)
+    environment:
+      - ENABLE_WYOMING=true
+      - WYOMING_PORT=10200
+      - WYOMING_HOST=0.0.0.0
+```
+
+Restart your container:
+```bash
+docker compose up -d
+```
+
+### 2. Connect Home Assistant to NeuTTS
+
+1. In Home Assistant, navigate to **Settings > Devices & Services**.
+2. Click **Add Integration** and search for **Wyoming Protocol**.
+3. Configure the connection:
+   * **Host:** IP address of your NeuTTS Docker host (or Docker service name if on the same network).
+   * **Port:** `10200`
+4. Home Assistant will discover NeuTTS and register all installed voice clones.
+5. Go to **Settings > Voice assistants**, click on your assistant pipeline, and under **Text-to-speech**, select **NeuTTS**.
+
+---
+
+## Available Endpoints & Protocols
+
+| Protocol / Method | Endpoint / Port | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `HTTP GET` | `http://<host>:8090/` | Web Management Portal UI | No |
+| `HTTP GET` | `http://<host>:8090/v1/models` | List models (`tts-1`, `tts-1-hd`, `neutts`) | Yes (if `API_KEY` set) |
+| `HTTP GET` | `http://<host>:8090/v1/audio/voices` | List installed voice clones & transcripts | Yes (if `API_KEY` set) |
+| `HTTP POST` | `http://<host>:8090/v1/audio/voices` | Upload and encode a reference voice (`multipart/form-data`) | Yes (if `API_KEY` set) |
+| `HTTP DELETE`| `http://<host>:8090/v1/audio/voices/{id}` | Delete a voice clone from persistent volume | Yes (if `API_KEY` set) |
+| `HTTP POST` | `http://<host>:8090/v1/audio/speech` | OpenAI-compatible TTS (Streaming & Batch) | Yes (if `API_KEY` set) |
+| `HTTP GET` | `http://<host>:8090/api/status` | Server status, backend device, capability flags | No |
+| `TCP` | `tcp://<host>:10200` | **Wyoming Protocol** for Home Assistant Assist TTS | **No (Unauthenticated)** |
 
 ---
 

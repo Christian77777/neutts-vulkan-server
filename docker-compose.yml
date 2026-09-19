@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     ports:
       - "8090:8090"
+      # Native Wyoming protocol port for Home Assistant
+      - "10200:10200"
     devices:
       # Pass GPU hardware nodes (Intel Arc / AMD Radeon) into container
       - /dev/dri:/dev/dri
@@ -23,6 +25,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DEFAULT_VOICE=aelita
+      # Home Assistant Wyoming Protocol Toggle:
+      - ENABLE_WYOMING=true
+      - WYOMING_PORT=10200
+      - WYOMING_HOST=0.0.0.0
       # Optional: set API_KEY to require Bearer authentication on all /v1/* endpoints
       # - API_KEY=your-secret-key
       # Optional: configure CORS allowed origins (unset by default; set * or list origins)

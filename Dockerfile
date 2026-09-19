@@ -33,7 +33,8 @@ RUN pip install --no-cache-dir \
     uvicorn \
     python-multipart \
     soundfile \
-    pydantic
+    pydantic \
+    "wyoming[zeroconf]>=1.5.0"
 
 # 4. Copy server application code and static web portal
 COPY openai_server.py cache_reference.py /app/
@@ -49,12 +50,15 @@ ENV HOST=0.0.0.0
 ENV VOICES_DIR=/app/voices
 ENV STATIC_DIR=/app/static
 ENV DEFAULT_VOICE=""
+ENV ENABLE_WYOMING=false
+ENV WYOMING_PORT=10200
+ENV WYOMING_HOST=0.0.0.0
 ENV SSL_KEYFILE=""
 ENV SSL_CERTFILE=""
 ENV SSL_KEYFILE_PASSWORD=""
 ENV SSL_CA_CERTS=""
 
-EXPOSE 8090
+EXPOSE 8090 10200
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -s -f -k http://localhost:8090/api/status || curl -s -f -k https://localhost:8090/api/status || exit 1

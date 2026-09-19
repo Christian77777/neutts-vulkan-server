@@ -3,6 +3,7 @@ import re
 import time
 import shutil
 import secrets
+import asyncio
 import tempfile
 import subprocess
 import threading
@@ -138,6 +139,30 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB max reference audio
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
 VOICE_NAME_REGEX = re.compile(r'^[a-z0-9_-]{1,64}$')
 
+# Wyoming Protocol (Home Assistant Voice Assistant) Configuration
+ENABLE_WYOMING = os.environ.get("ENABLE_WYOMING", "false").strip().lower() in ("true", "1", "yes", "on", "enable", "enabled")
+WYOMING_PORT = int(os.environ.get("WYOMING_PORT", "10200"))
+WYOMING_HOST = os.environ.get("WYOMING_HOST", "0.0.0.0")
+wyoming_server = None
+wyoming_zeroconf = None
+
+try:
+    from wyoming.server import AsyncServer, AsyncEventHandler
+    from wyoming.info import Describe, Info, TtsProgram, TtsVoice, Attribution
+    from wyoming.tts import Synthesize
+    from wyoming.audio import AudioStart, AudioChunk, AudioStop
+    from wyoming.ping import Ping, Pong
+    from wyoming.event import Event
+    WYOMING_AVAILABLE = True
+except ImportError:
+    WYOMING_AVAILABLE = False
+
+try:
+    from wyoming.zeroconf import HomeAssistantZeroconf
+    ZEROCONF_AVAILABLE = True
+except ImportError:
+    ZEROCONF_AVAILABLE = False
+
 
 def validate_voice_name(name: str) -> str:
     """Validate voice name against path traversal, special characters, and length limits."""
@@ -205,7 +230,7 @@ def load_voice(voice_name: str) -> Tuple[torch.Tensor, str]:
 
 
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
     global tts_model
 
     # Ensure voices volume directory exists
@@ -238,6 +263,40 @@ def startup_event():
 
     print("[INIT] NeuTTS Server ready!")
 
+    # Start Wyoming Server for Home Assistant if enabled
+    if ENABLE_WYOMING:
+        if not WYOMING_AVAILABLE:
+            print("[WYOMING ERROR] ENABLE_WYOMING is set to true, but the 'wyoming' package is not installed.")
+        else:
+            wyoming_uri = f"tcp://{WYOMING_HOST}:{WYOMING_PORT}"
+            try:
+                global wyoming_server, wyoming_zeroconf
+                wyoming_server = AsyncServer.from_uri(wyoming_uri)
+                await wyoming_server.start(NeuTTSWyomingHandler)
+                print(f"[WYOMING] Server listening on {wyoming_uri}")
+
+                if ZEROCONF_AVAILABLE and WYOMING_HOST in ("0.0.0.0", ""):
+                    try:
+                        wyoming_zeroconf = HomeAssistantZeroconf(port=WYOMING_PORT, name="NeuTTS")
+                        await wyoming_zeroconf.register_server()
+                        print(f"[WYOMING] Registered Zeroconf mDNS service 'NeuTTS._wyoming._tcp.local.' on port {WYOMING_PORT}")
+                    except Exception as zc_err:
+                        print(f"[WYOMING INFO] Zeroconf registration skipped: {zc_err}")
+            except Exception as e:
+                print(f"[WYOMING ERROR] Failed to start Wyoming server: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global wyoming_server
+    if wyoming_server is not None:
+        print("[WYOMING] Stopping Wyoming server...")
+        try:
+            await wyoming_server.stop()
+        except Exception as e:
+            print(f"[WYOMING ERROR] Error stopping Wyoming server: {e}")
+        print("[WYOMING] Wyoming server stopped.")
+
 
 class SpeechRequest(BaseModel):
     model: str = "tts-1"
@@ -265,7 +324,7 @@ def get_atempo_filter(speed: float) -> str:
     return ",".join(filters)
 
 
-def pcm_streamer(text: str, ref_codes: torch.Tensor, ref_text: str, speed: float = 1.0):
+def pcm_streamer(text: str, ref_codes: torch.Tensor, ref_text: str, speed: float = 1.0, cancel_event: Optional[threading.Event] = None):
     """Yields 24kHz mono 16-bit little-endian PCM bytes."""
     with tts_lock:
         t0 = time.time()
@@ -274,6 +333,9 @@ def pcm_streamer(text: str, ref_codes: torch.Tensor, ref_text: str, speed: float
             first = True
             total_samples = 0
             for chunk in tts_model.infer_stream(text, ref_codes, ref_text):
+                if cancel_event and cancel_event.is_set():
+                    print("[STREAM-PCM] Inference cancelled mid-stream.")
+                    break
                 if first:
                     print(f"[STREAM-PCM] First chunk TTFA: {time.time()-t0:.3f}s")
                     first = False
@@ -299,6 +361,8 @@ def pcm_streamer(text: str, ref_codes: torch.Tensor, ref_text: str, speed: float
             def feeder():
                 try:
                     for chunk in tts_model.infer_stream(text, ref_codes, ref_text):
+                        if cancel_event and cancel_event.is_set():
+                            break
                         pcm_bytes = (chunk * 32767.0).clip(-32768, 32767).astype(np.int16).tobytes()
                         proc.stdin.write(pcm_bytes)
                         proc.stdin.flush()
@@ -397,6 +461,160 @@ def ffmpeg_pipe_streamer(text: str, ref_codes: torch.Tensor, ref_text: str, fmt:
             feed_thread.join(timeout=2.0)
             proc.wait(timeout=2.0)
             print(f"[STREAM-{fmt.upper()}] Finished in {time.time()-t0:.2f}s")
+
+
+# --- WYOMING PROTOCOL HANDLERS (HOME ASSISTANT) ---
+
+async def async_pcm_streamer(text: str, ref_codes: torch.Tensor, ref_text: str, speed: float = 1.0):
+    """Yields 24kHz mono 16-bit little-endian PCM bytes asynchronously without blocking the event loop."""
+    queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    cancel_event = threading.Event()
+
+    def worker():
+        try:
+            for pcm_chunk in pcm_streamer(text, ref_codes, ref_text, speed=speed, cancel_event=cancel_event):
+                if cancel_event.is_set():
+                    break
+                loop.call_soon_threadsafe(queue.put_nowait, pcm_chunk)
+        except Exception as err:
+            loop.call_soon_threadsafe(queue.put_nowait, err)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
+    finally:
+        cancel_event.set()
+
+
+if WYOMING_AVAILABLE:
+    class NeuTTSWyomingHandler(AsyncEventHandler):
+        """Wyoming protocol handler for Home Assistant local voice pipeline.
+        
+        NOTE: The Wyoming protocol is unauthenticated by design. Restrict port
+        access to trusted local network or internal Docker bridge.
+        """
+
+        def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+            super().__init__(reader, writer)
+
+        async def run(self) -> None:
+            """Wrap event loop to cleanly handle client socket disconnects without unhandled task exceptions."""
+            try:
+                await super().run()
+            except (ConnectionResetError, BrokenPipeError, ConnectionError, asyncio.IncompleteReadError):
+                pass
+            except Exception as e:
+                print(f"[WYOMING HANDLER ERROR] {e}")
+
+        async def handle_event(self, event: Event) -> bool:
+            if Describe.is_type(event.type):
+                attribution = Attribution(name="NeuTTS", url="https://github.com/Christian77777/neutts-vulkan-server")
+                available = get_available_voice_names()
+                tts_voices = []
+                for name in available:
+                    tts_voices.append(
+                        TtsVoice(
+                            name=name,
+                            description=f"NeuTTS voice: {name.replace('_', ' ').title()}",
+                            attribution=attribution,
+                            installed=True,
+                            version="1.0.0",
+                            languages=["en"],
+                        )
+                    )
+                if not tts_voices:
+                    fallback_name = DEFAULT_VOICE or "default"
+                    tts_voices.append(
+                        TtsVoice(
+                            name=fallback_name,
+                            description="Default Cloned Voice",
+                            attribution=attribution,
+                            installed=True,
+                            version="1.0.0",
+                            languages=["en"],
+                        )
+                    )
+
+                program = TtsProgram(
+                    name="NeuTTS",
+                    description="NeuTTS Vulkan Streaming Text-to-Speech Engine",
+                    attribution=attribution,
+                    installed=True,
+                    version="1.2.0",
+                    voices=tts_voices,
+                    supports_synthesize_streaming=False,
+                )
+                await self.write_event(Info(tts=[program]).event())
+                return True
+
+            if Synthesize.is_type(event.type):
+                if tts_model is None:
+                    print("[WYOMING ERROR] TTS model is not initialized.")
+                    return True
+
+                synth = Synthesize.from_event(event)
+                text = (synth.text or "").strip()
+                if not text:
+                    try:
+                        await self.write_event(AudioStart(rate=24000, width=2, channels=1).event())
+                        await self.write_event(AudioStop().event())
+                    except Exception:
+                        pass
+                    return True
+
+                # Security: Prevent DoS / resource exhaustion from arbitrarily large text payloads
+                if len(text) > 4096:
+                    print(f"[WYOMING WARNING] Input text exceeds 4096 characters ({len(text)} chars); truncating.")
+                    text = text[:4096]
+
+                requested_voice = synth.voice.name if (synth.voice and synth.voice.name) else DEFAULT_VOICE
+                if requested_voice:
+                    try:
+                        requested_voice = validate_voice_name(requested_voice)
+                    except Exception:
+                        requested_voice = DEFAULT_VOICE
+
+                try:
+                    ref_codes, ref_text = load_voice(requested_voice)
+                except Exception as e:
+                    print(f"[WYOMING ERROR] Could not load voice '{requested_voice}': {e}")
+                    return True
+
+                print(f"[WYOMING SYNTHESIZE] text_len={len(text)}, voice='{requested_voice}'")
+                try:
+                    await self.write_event(AudioStart(rate=24000, width=2, channels=1).event())
+                    async for pcm_chunk in async_pcm_streamer(text, ref_codes, ref_text):
+                        await self.write_event(AudioChunk(rate=24000, width=2, channels=1, audio=pcm_chunk).event())
+                except (ConnectionResetError, BrokenPipeError):
+                    print("[WYOMING] Client disconnected during audio stream")
+                except Exception as e:
+                    print(f"[WYOMING SYNTHESIZE ERROR] {e}")
+                finally:
+                    try:
+                        await self.write_event(AudioStop().event())
+                    except Exception:
+                        pass
+
+                return True
+
+            if Ping.is_type(event.type):
+                ping = Ping.from_event(event)
+                await self.write_event(Pong(text=ping.text).event())
+                return True
+
+            return False
+else:
+    NeuTTSWyomingHandler = None
 
 
 # --- WEB PORTAL & MANAGEMENT ROUTES ---
@@ -599,8 +817,8 @@ def generate_speech(request: SpeechRequest):
 
     print(f"[REQUEST] input_len={len(clean_input)}, voice={requested_voice}, format={fmt}, speed={speed}, stream={request.stream}")
 
-    # 5. Low-latency Streaming (default for PCM, MP3, Opus unless explicitly disabled)
-    should_stream = request.stream is not False
+    # 5. Low-latency Streaming (default for PCM; stream for MP3/Opus when explicitly requested)
+    should_stream = bool(request.stream) if request.stream is not None else (fmt == "pcm")
     if fmt == "pcm":
         return StreamingResponse(
             pcm_streamer(clean_input, ref_codes, ref_text, speed=speed),
@@ -741,6 +959,19 @@ def status(request: Request):
     is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     ssl_configured = bool(os.environ.get("SSL_CERTFILE") and os.environ.get("SSL_KEYFILE"))
 
+    features = [
+        "voice-management-portal",
+        "pcm-streaming",
+        "mp3-streaming",
+        "openai-compatible",
+        "speed-control",
+        "models-discovery",
+        "api-key-auth",
+        "ssl-tls",
+    ]
+    if ENABLE_WYOMING:
+        features.append("wyoming-protocol")
+
     return {
         "status": "online",
         "engine": "NeuTTS-Air",
@@ -751,16 +982,9 @@ def status(request: Request):
         "auth_required": bool(API_KEY),
         "ssl_enabled": ssl_configured or is_https,
         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
-        "features": [
-            "voice-management-portal",
-            "pcm-streaming",
-            "mp3-streaming",
-            "openai-compatible",
-            "speed-control",
-            "models-discovery",
-            "api-key-auth",
-            "ssl-tls"
-        ]
+        "wyoming_enabled": ENABLE_WYOMING,
+        "wyoming_port": WYOMING_PORT if ENABLE_WYOMING else None,
+        "features": features,
     }
 
 
@@ -777,6 +1001,10 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8090")))
     parser.add_argument("--voices-dir", type=str, default=str(VOICES_DIR))
     parser.add_argument("--default-voice", type=str, default=DEFAULT_VOICE)
+    # Wyoming Protocol options (Home Assistant Assist)
+    parser.add_argument("--enable-wyoming", action="store_true", default=ENABLE_WYOMING, help="Enable Wyoming protocol server for Home Assistant (UNAUTHENTICATED)")
+    parser.add_argument("--wyoming-port", type=int, default=WYOMING_PORT, help="Wyoming server port (default: 10200)")
+    parser.add_argument("--wyoming-host", type=str, default=WYOMING_HOST, help="Wyoming server host (default: 0.0.0.0)")
     # SSL / TLS configuration options
     parser.add_argument("--ssl-keyfile", type=str, default=os.environ.get("SSL_KEYFILE", ""))
     parser.add_argument("--ssl-certfile", type=str, default=os.environ.get("SSL_CERTFILE", ""))
@@ -791,6 +1019,10 @@ if __name__ == "__main__":
     os.environ["CODEC_DEVICE"] = args.codec_device
     os.environ["VOICES_DIR"] = args.voices_dir
     os.environ["DEFAULT_VOICE"] = args.default_voice
+    if args.enable_wyoming:
+        os.environ["ENABLE_WYOMING"] = "true"
+    os.environ["WYOMING_PORT"] = str(args.wyoming_port)
+    os.environ["WYOMING_HOST"] = args.wyoming_host
 
     ssl_keyfile = args.ssl_keyfile.strip() if args.ssl_keyfile else None
     ssl_certfile = args.ssl_certfile.strip() if args.ssl_certfile else None
