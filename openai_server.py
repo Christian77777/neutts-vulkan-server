@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import soundfile as sf
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Depends, Security
-from fastapi.responses import Response, StreamingResponse, FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import Response, StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -136,7 +136,7 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "./static")).resolve()
 VOICES_DIR = Path(os.environ.get("VOICES_DIR", "./voices")).resolve()
 DEFAULT_VOICE = os.environ.get("DEFAULT_VOICE", "")
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB max reference audio
-ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".ogg", ".flac", ".m4a", ".webm", ".aac", ".opus"}
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
 VOICE_NAME_REGEX = re.compile(r'^[a-z0-9_-]{1,64}$')
 
 # Wyoming Protocol (Home Assistant Voice Assistant) Configuration
@@ -146,27 +146,10 @@ WYOMING_HOST = os.environ.get("WYOMING_HOST", "0.0.0.0")
 wyoming_server = None
 wyoming_zeroconf = None
 
-# Whisper Speech-to-Text (Vulkan STT) Configuration
-ENABLE_WHISPER = os.environ.get("ENABLE_WHISPER", "true").strip().lower() in ("true", "1", "yes", "on", "enable", "enabled")
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
-WHISPER_LANG = os.environ.get("WHISPER_LANG", "en")
-WHISPER_MODELS_DIR = Path(os.environ.get("WHISPER_MODELS_DIR", "/cache/whisper")).resolve()
-WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "4"))
-whisper_model = None
-whisper_lock = threading.Lock()
-
-try:
-    from pywhispercpp.model import Model as WhisperModel
-    WHISPER_AVAILABLE = True
-except ImportError:
-    WhisperModel = None
-    WHISPER_AVAILABLE = False
-
 try:
     from wyoming.server import AsyncServer, AsyncEventHandler
-    from wyoming.info import Describe, Info, TtsProgram, TtsVoice, Attribution, AsrProgram, AsrModel
+    from wyoming.info import Describe, Info, TtsProgram, TtsVoice, Attribution
     from wyoming.tts import Synthesize
-    from wyoming.asr import Transcribe, Transcript
     from wyoming.audio import AudioStart, AudioChunk, AudioStop
     from wyoming.ping import Ping, Pong
     from wyoming.event import Event
@@ -246,44 +229,12 @@ def load_voice(voice_name: str) -> Tuple[torch.Tensor, str]:
     return ref_codes, ref_text
 
 
-def resolve_whisper_model_path(model_name_or_path: str, models_dir: Path) -> str:
-    """Resolve Whisper GGML model path or download it directly using huggingface_hub."""
-    models_dir.mkdir(parents=True, exist_ok=True)
-
-    # 1. Check if direct file path exists
-    p = Path(model_name_or_path)
-    if p.is_file():
-        return str(p.resolve())
-
-    # 2. Check within models_dir
-    candidate = models_dir / model_name_or_path
-    if candidate.is_file():
-        return str(candidate.resolve())
-
-    bin_name = model_name_or_path if model_name_or_path.endswith(".bin") else f"ggml-{model_name_or_path}.bin"
-    candidate_bin = models_dir / bin_name
-    if candidate_bin.is_file():
-        return str(candidate_bin.resolve())
-
-    # 3. Download via huggingface_hub
-    from huggingface_hub import hf_hub_download
-    print(f"[WHISPER] Model file '{bin_name}' not found locally. Downloading from Hugging Face (ggerganov/whisper.cpp)...")
-    downloaded = hf_hub_download(
-        repo_id="ggerganov/whisper.cpp",
-        filename=bin_name,
-        local_dir=str(models_dir)
-    )
-    print(f"[WHISPER] Model successfully downloaded via Hugging Face Hub: {downloaded}")
-    return str(downloaded)
-
-
 @app.on_event("startup")
 async def startup_event():
-    global tts_model, whisper_model
+    global tts_model
 
-    # Ensure voices and whisper directories exist
+    # Ensure voices volume directory exists
     VOICES_DIR.mkdir(parents=True, exist_ok=True)
-    WHISPER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     backbone_repo = os.environ.get("BACKBONE_REPO", "neuphonic/neutts-air-q8-gguf")
     backbone_device = os.environ.get("BACKBONE_DEVICE", "gpu")
@@ -311,19 +262,6 @@ async def startup_event():
         print("[INIT] Voices volume is empty. Voices can be uploaded anytime via the Web Portal.")
 
     print("[INIT] NeuTTS Server ready!")
-
-    # Initialize Whisper Speech-to-Text if enabled
-    if ENABLE_WHISPER:
-        if not WHISPER_AVAILABLE:
-            print("[WHISPER ERROR] ENABLE_WHISPER is set to true, but 'pywhispercpp' is not installed.")
-        else:
-            try:
-                print(f"[INIT] Initializing Whisper STT: model={WHISPER_MODEL}, lang={WHISPER_LANG}, dir={WHISPER_MODELS_DIR}, threads={WHISPER_THREADS}...")
-                model_path = resolve_whisper_model_path(WHISPER_MODEL, WHISPER_MODELS_DIR)
-                whisper_model = WhisperModel(model_path, n_threads=WHISPER_THREADS)
-                print(f"[INIT] Whisper STT model '{WHISPER_MODEL}' resident in GPU VRAM / memory!")
-            except Exception as e:
-                print(f"[WHISPER ERROR] Failed to load Whisper model: {e}")
 
     # Start Wyoming Server for Home Assistant if enabled
     if ENABLE_WYOMING:
@@ -568,11 +506,6 @@ if WYOMING_AVAILABLE:
 
         def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             super().__init__(reader, writer)
-            self._asr_language = WHISPER_LANG if WHISPER_LANG != "auto" else None
-            self._audio_buffer = bytearray()
-            self._audio_rate = 16000
-            self._audio_width = 2
-            self._audio_channels = 1
 
         async def run(self) -> None:
             """Wrap event loop to cleanly handle client socket disconnects without unhandled task exceptions."""
@@ -621,86 +554,8 @@ if WYOMING_AVAILABLE:
                     voices=tts_voices,
                     supports_synthesize_streaming=False,
                 )
-
-                info_kwargs = {"tts": [program]}
-                if ENABLE_WHISPER and whisper_model is not None:
-                    asr_models = [
-                        AsrModel(
-                            name=WHISPER_MODEL,
-                            description=f"Whisper {WHISPER_MODEL} STT Engine",
-                            attribution=attribution,
-                            installed=True,
-                            version="1.0.0",
-                            languages=[WHISPER_LANG] if WHISPER_LANG and WHISPER_LANG != "auto" else ["en"],
-                        )
-                    ]
-                    asr_program = AsrProgram(
-                        name="whisper",
-                        description="Whisper Vulkan Speech-to-Text Engine",
-                        attribution=attribution,
-                        installed=True,
-                        version="1.0.0",
-                        models=asr_models,
-                    )
-                    info_kwargs["asr"] = [asr_program]
-
-                await self.write_event(Info(**info_kwargs).event())
+                await self.write_event(Info(tts=[program]).event())
                 return True
-
-            if Transcribe.is_type(event.type):
-                transcribe = Transcribe.from_event(event)
-                if transcribe.language:
-                    self._asr_language = transcribe.language
-                self._audio_buffer = bytearray()
-                return True
-
-            if AudioStart.is_type(event.type):
-                audio_start = AudioStart.from_event(event)
-                self._audio_rate = audio_start.rate or 16000
-                self._audio_width = audio_start.width or 2
-                self._audio_channels = audio_start.channels or 1
-                self._audio_buffer = bytearray()
-                return True
-
-            if AudioChunk.is_type(event.type):
-                chunk = AudioChunk.from_event(event)
-                if chunk.audio:
-                    self._audio_buffer.extend(chunk.audio)
-                return True
-
-            if AudioStop.is_type(event.type):
-                if whisper_model is not None and len(self._audio_buffer) > 0:
-                    pcm_bytes = bytes(self._audio_buffer)
-                    audio_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-
-                    if self._audio_channels > 1 and len(audio_np) >= self._audio_channels:
-                        audio_np = audio_np.reshape(-1, self._audio_channels).mean(axis=1)
-
-                    if self._audio_rate != 16000 and len(audio_np) > 0:
-                        target_len = int(len(audio_np) * 16000 / self._audio_rate)
-                        audio_np = np.interp(
-                            np.linspace(0, len(audio_np), target_len, endpoint=False),
-                            np.arange(len(audio_np)),
-                            audio_np
-                        ).astype(np.float32)
-
-                    lang = self._asr_language if (self._asr_language and self._asr_language != "auto") else None
-                    transcript_text = ""
-                    try:
-                        with whisper_lock:
-                            segments = whisper_model.transcribe(audio_np, language=lang)
-                        transcript_text = "".join(seg.text for seg in segments).strip()
-                        print(f"[WYOMING ASR] Transcribed {len(audio_np)/16000:.2f}s audio -> '{transcript_text}'")
-                    except Exception as asr_err:
-                        print(f"[WYOMING ASR ERROR] Transcription failed: {asr_err}")
-
-                    await self.write_event(Transcript(text=transcript_text).event())
-                    self._audio_buffer = bytearray()
-                    return True
-                else:
-                    await self.write_event(Transcript(text="").event())
-                    self._audio_buffer = bytearray()
-                    return True
 
             if Synthesize.is_type(event.type):
                 if tts_model is None:
@@ -1048,147 +903,6 @@ def generate_speech(request: SpeechRequest):
                 pass
 
 
-# --- OPENAI SPEECH-TO-TEXT / TRANSCRIPTION ROUTES ---
-
-@app.post("/v1/audio/transcriptions", dependencies=[Depends(verify_api_key)])
-@app.post("/audio/transcriptions", dependencies=[Depends(verify_api_key)])
-async def transcribe_audio(
-    file: UploadFile = File(...),
-    model: str = Form("whisper-1"),
-    language: Optional[str] = Form(None),
-    prompt: Optional[str] = Form(None),
-    response_format: Optional[str] = Form("json"),
-    temperature: Optional[float] = Form(0.0),
-):
-    """OpenAI-compatible speech-to-text audio transcription endpoint."""
-    if not ENABLE_WHISPER or whisper_model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Whisper Speech-to-Text engine is not enabled or failed to initialize."
-        )
-
-    # Validate file extension
-    suffix = Path(file.filename or "audio.wav").suffix.lower()
-    if suffix not in ALLOWED_AUDIO_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported audio format '{suffix}'. Allowed formats: {', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}"
-        )
-
-    # Save uploaded audio with MAX_UPLOAD_BYTES limit enforcement
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_audio:
-        temp_path = temp_audio.name
-        total_bytes = 0
-        while chunk := await file.read(64 * 1024):
-            total_bytes += len(chunk)
-            if total_bytes > MAX_UPLOAD_BYTES:
-                temp_audio.close()
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"Payload Too Large: Audio sample exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit."
-                )
-            temp_audio.write(chunk)
-
-    if total_bytes == 0:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        raise HTTPException(status_code=400, detail="Uploaded audio file cannot be empty")
-
-    try:
-        # Decode audio to 16kHz mono 16-bit PCM using ffmpeg stdout
-        cmd = [
-            "ffmpeg", "-nostdin", "-threads", "0", "-i", temp_path,
-            "-f", "s16le", "-ac", "1", "-ar", "16000", "-"
-        ]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if proc.returncode != 0:
-            err_msg = proc.stderr.decode("utf-8", errors="replace").strip()
-            print(f"[WHISPER ERROR] FFmpeg decoding error: {err_msg}")
-            raise HTTPException(status_code=400, detail="Failed to decode audio file into 16kHz PCM")
-
-        raw_pcm = proc.stdout
-        if not raw_pcm:
-            raise HTTPException(status_code=400, detail="Decoded audio stream is empty")
-
-        audio_np = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        audio_duration = len(audio_np) / 16000.0
-
-        lang = language if (language and language != "auto") else (WHISPER_LANG if WHISPER_LANG != "auto" else None)
-
-        print(f"[TRANSCRIPTION REQUEST] audio_len={audio_duration:.2f}s, format={response_format}, lang={lang}")
-
-        t_start = time.time()
-        with whisper_lock:
-            segments = whisper_model.transcribe(audio_np, language=lang)
-        t_infer = time.time() - t_start
-
-        full_text = "".join(seg.text for seg in segments).strip()
-        print(f"[TRANSCRIPTION TIMING] infer: {t_infer:.2f}s (audio: {audio_duration:.2f}s) -> '{full_text}'")
-
-        fmt = (response_format or "json").lower()
-        if fmt == "text":
-            return PlainTextResponse(full_text)
-        elif fmt == "verbose_json":
-            out_segments = []
-            for i, seg in enumerate(segments):
-                out_segments.append({
-                    "id": i,
-                    "seek": 0,
-                    "start": seg.t0 / 100.0,
-                    "end": seg.t1 / 100.0,
-                    "text": seg.text,
-                    "tokens": [],
-                    "temperature": temperature or 0.0,
-                    "avg_logprob": 0.0,
-                    "compression_ratio": 0.0,
-                    "no_speech_prob": 0.0,
-                })
-            return {
-                "task": "transcribe",
-                "language": lang or "en",
-                "duration": audio_duration,
-                "text": full_text,
-                "segments": out_segments,
-            }
-        elif fmt == "vtt":
-            vtt_lines = ["WEBVTT\n"]
-            for seg in segments:
-                s_sec, e_sec = seg.t0 / 100.0, seg.t1 / 100.0
-                s_h, s_m, s_s = int(s_sec // 3600), int((s_sec % 3600) // 60), s_sec % 60
-                e_h, e_m, e_s = int(e_sec // 3600), int((e_sec % 3600) // 60), e_sec % 60
-                vtt_lines.append(f"{s_h:02d}:{s_m:02d}:{s_s:06.3f} --> {e_h:02d}:{e_m:02d}:{e_s:06.3f}")
-                vtt_lines.append(seg.text.strip())
-                vtt_lines.append("")
-            return PlainTextResponse("\n".join(vtt_lines), media_type="text/vtt")
-        elif fmt == "srt":
-            srt_lines = []
-            for i, seg in enumerate(segments, 1):
-                s_sec, e_sec = seg.t0 / 100.0, seg.t1 / 100.0
-                s_h, s_m, s_s = int(s_sec // 3600), int((s_sec % 3600) // 60), s_sec % 60
-                e_h, e_m, e_s = int(e_sec // 3600), int((e_sec % 3600) // 60), e_sec % 60
-                s_str = f"{s_h:02d}:{s_m:02d}:{int(s_s):02d},{int((s_s % 1) * 1000):03d}"
-                e_str = f"{e_h:02d}:{e_m:02d}:{int(e_s):02d},{int((e_s % 1) * 1000):03d}"
-                srt_lines.append(f"{i}\n{s_str} --> {e_str}\n{seg.text.strip()}\n")
-            return PlainTextResponse("\n".join(srt_lines), media_type="application/x-subrip")
-        else:
-            return {"text": full_text}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
-    finally:
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
-
-
 # --- OPENAI MODELS COMPATIBILITY ENDPOINTS ---
 
 @app.get("/v1/models", dependencies=[Depends(verify_api_key)])
@@ -1197,8 +911,6 @@ def list_models():
     """List available models for OpenAI SDK and third-party client discovery."""
     now = int(time.time())
     model_ids = ["tts-1", "tts-1-hd", "neutts"]
-    if ENABLE_WHISPER:
-        model_ids.extend(["whisper-1", WHISPER_MODEL])
     return {
         "object": "list",
         "data": [
@@ -1259,8 +971,6 @@ def status(request: Request):
     ]
     if ENABLE_WYOMING:
         features.append("wyoming-protocol")
-    if ENABLE_WHISPER:
-        features.append("whisper-stt")
 
     return {
         "status": "online",
@@ -1274,8 +984,6 @@ def status(request: Request):
         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
         "wyoming_enabled": ENABLE_WYOMING,
         "wyoming_port": WYOMING_PORT if ENABLE_WYOMING else None,
-        "whisper_enabled": ENABLE_WHISPER,
-        "whisper_model": WHISPER_MODEL if ENABLE_WHISPER else None,
         "features": features,
     }
 
@@ -1293,12 +1001,6 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8090")))
     parser.add_argument("--voices-dir", type=str, default=str(VOICES_DIR))
     parser.add_argument("--default-voice", type=str, default=DEFAULT_VOICE)
-    # Whisper Speech-to-Text options
-    parser.add_argument("--enable-whisper", action="store_true", default=ENABLE_WHISPER, help="Enable Whisper Speech-to-Text engine (default: true)")
-    parser.add_argument("--whisper-model", type=str, default=WHISPER_MODEL, help="Whisper model name or path (default: large-v3-turbo)")
-    parser.add_argument("--whisper-lang", type=str, default=WHISPER_LANG, help="Whisper default language (default: en)")
-    parser.add_argument("--whisper-models-dir", type=str, default=str(WHISPER_MODELS_DIR), help="Whisper models directory (default: /cache/whisper)")
-    parser.add_argument("--whisper-threads", type=int, default=WHISPER_THREADS, help="Whisper CPU threads for pre/post processing (default: 4)")
     # Wyoming Protocol options (Home Assistant Assist)
     parser.add_argument("--enable-wyoming", action="store_true", default=ENABLE_WYOMING, help="Enable Wyoming protocol server for Home Assistant (UNAUTHENTICATED)")
     parser.add_argument("--wyoming-port", type=int, default=WYOMING_PORT, help="Wyoming server port (default: 10200)")
@@ -1317,12 +1019,6 @@ if __name__ == "__main__":
     os.environ["CODEC_DEVICE"] = args.codec_device
     os.environ["VOICES_DIR"] = args.voices_dir
     os.environ["DEFAULT_VOICE"] = args.default_voice
-    if args.enable_whisper:
-        os.environ["ENABLE_WHISPER"] = "true"
-    os.environ["WHISPER_MODEL"] = args.whisper_model
-    os.environ["WHISPER_LANG"] = args.whisper_lang
-    os.environ["WHISPER_MODELS_DIR"] = args.whisper_models_dir
-    os.environ["WHISPER_THREADS"] = str(args.whisper_threads)
     if args.enable_wyoming:
         os.environ["ENABLE_WYOMING"] = "true"
     os.environ["WYOMING_PORT"] = str(args.wyoming_port)

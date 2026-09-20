@@ -1,23 +1,23 @@
 # NeuTTS Server
 
-An OpenAI-compatible streaming Text-to-Speech (TTS) and Speech-to-Text (STT) server powered by **NeuTTS-Air** and **Whisper (`large-v3-turbo`)**, accelerated with **Vulkan**.
+An OpenAI-compatible streaming Text-to-Speech (TTS) server powered by **NeuTTS-Air** and accelerated with **Vulkan**.
 
-Supports zero-shot voice cloning with 8-bit quantization (`neuphonic/neutts-air-q8-gguf`) and high-speed Whisper transcription resident in GPU VRAM across **Intel Arc, AMD Radeon, and NVIDIA GPUs** (with CPU fallback).
+Supports zero-shot voice cloning with 8-bit quantization (`neuphonic/neutts-air-q8-gguf`) across **Intel Arc, AMD Radeon, and NVIDIA GPUs** (with CPU fallback).
 
 ---
 
 ## Features
 
-- **Hardware Acceleration via Vulkan:** Offloads LLM backbone inference and Whisper STT using Vulkan compute support for Intel Arc, AMD Radeon, and NVIDIA GPUs.
-- **Whisper Speech-to-Text (`large-v3-turbo`):** GPU-accelerated local transcription via `pywhispercpp` with Vulkan compute shaders, keeping model weights resident in VRAM for instant inference.
-- **Unified Home Assistant Wyoming Pipeline:** Native TCP streaming for both Text-to-Speech (`TtsProgram`) and Speech-to-Text (`AsrProgram`) on port `10200` for Home Assistant Assist pipelines and satellites.
+- **Hardware Acceleration via Vulkan:** Offloads LLM backbone inference using `llama-cpp-python` with Vulkan compute support for Intel Arc, AMD Radeon, and NVIDIA GPUs.
 - **Voice Management Web Portal:** Single-page interface at `http://localhost:8090/` to inspect, clone, test, and delete voices with in-browser audio playback.
 - **Streaming Audio:** Emits chunked 24 kHz 16-bit mono PCM (`response_format: pcm`), MP3, or Opus with sub-second Time-To-First-Byte (TTFB).
 - **Voice Cloning:** Reference audio is encoded directly into the mounted volume (`/app/voices`) and cached in memory without restarting the container.
-- **OpenAI API Compatibility:** Implements `/v1/audio/speech`, `/v1/audio/transcriptions`, and `/v1/models` endpoints for compatibility with OpenAI SDKs and third-party tools (Hermes Agent, Open-WebUI, LibreChat).
-- **Persistent Storage:** Voices and downloaded Whisper models persist across container restarts via host-mounted volumes.
+- **Quantization:** Runs the 8-bit quantized backbone (`neuphonic/neutts-air-q8-gguf`).
+- **OpenAI API Compatibility:** Implements `/v1/audio/speech` and `/v1/models` endpoints for compatibility with OpenAI SDKs and third-party tools (Hermes Agent, Open-WebUI, LibreChat).
+- **Persistent Storage:** Voices persist across container restarts via host-mounted `./voices:/app/voices`.
 - **Security Features:** Optional Bearer token authentication (`API_KEY`), configurable CORS origins, and security headers (CSP, HSTS, X-Frame-Options).
 - **SSL / TLS Support:** Direct HTTPS support with certificates (`SSL_CERTFILE` & `SSL_KEYFILE`), automatic HSTS, and dual HTTP/HTTPS healthchecks.
+- **Home Assistant Wyoming Protocol:** Native TCP streaming TTS on port `10200` for Home Assistant's local Assist voice pipeline and satellites (toggleable via `ENABLE_WYOMING=true`).
 
 ---
 
@@ -197,16 +197,10 @@ Uncomment the volume mount and environment variables:
 
 ```yaml
     volumes:
-      - ~/.cache/huggingface:/cache/huggingface
+      - ~/.cache/huggingface:/root/.cache/huggingface
       - ./voices:/app/voices
       - ./certs:/app/certs:ro
-    user: "1000:1000"
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
     environment:
-      - HF_HOME=/cache/huggingface
       - SSL_KEYFILE=/app/certs/key.pem
       - SSL_CERTFILE=/app/certs/cert.pem
 ```
@@ -258,12 +252,8 @@ docker compose up -d
 3. Configure the connection:
    * **Host:** IP address of your NeuTTS Docker host (or Docker service name if on the same network).
    * **Port:** `10200`
-4. Home Assistant will discover NeuTTS and register both:
-   * **Text-to-speech:** `NeuTTS` (with all installed cloned voices).
-   * **Speech-to-text:** `whisper` (`large-v3-turbo` model resident in GPU VRAM).
-5. Go to **Settings > Voice assistants**, click on your assistant pipeline:
-   * Under **Speech-to-text**, select **whisper** (NeuTTS).
-   * Under **Text-to-speech**, select **NeuTTS**.
+4. Home Assistant will discover NeuTTS and register all installed voice clones.
+5. Go to **Settings > Voice assistants**, click on your assistant pipeline, and under **Text-to-speech**, select **NeuTTS**.
 
 ---
 
@@ -272,14 +262,13 @@ docker compose up -d
 | Protocol / Method | Endpoint / Port | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
 | `HTTP GET` | `http://<host>:8090/` | Web Management Portal UI | No |
-| `HTTP GET` | `http://<host>:8090/v1/models` | List models (`tts-1`, `tts-1-hd`, `neutts`, `whisper-1`, `large-v3-turbo`) | Yes (if `API_KEY` set) |
+| `HTTP GET` | `http://<host>:8090/v1/models` | List models (`tts-1`, `tts-1-hd`, `neutts`) | Yes (if `API_KEY` set) |
 | `HTTP GET` | `http://<host>:8090/v1/audio/voices` | List installed voice clones & transcripts | Yes (if `API_KEY` set) |
 | `HTTP POST` | `http://<host>:8090/v1/audio/voices` | Upload and encode a reference voice (`multipart/form-data`) | Yes (if `API_KEY` set) |
 | `HTTP DELETE`| `http://<host>:8090/v1/audio/voices/{id}` | Delete a voice clone from persistent volume | Yes (if `API_KEY` set) |
 | `HTTP POST` | `http://<host>:8090/v1/audio/speech` | OpenAI-compatible TTS (Streaming & Batch) | Yes (if `API_KEY` set) |
-| `HTTP POST` | `http://<host>:8090/v1/audio/transcriptions` | OpenAI-compatible STT (`whisper-1`, `large-v3-turbo`) | Yes (if `API_KEY` set) |
 | `HTTP GET` | `http://<host>:8090/api/status` | Server status, backend device, capability flags | No |
-| `TCP` | `tcp://<host>:10200` | **Wyoming Protocol** for Home Assistant Assist (TTS + STT) | **No (Unauthenticated)** |
+| `TCP` | `tcp://<host>:10200` | **Wyoming Protocol** for Home Assistant Assist TTS | **No (Unauthenticated)** |
 
 ---
 

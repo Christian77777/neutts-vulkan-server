@@ -11,33 +11,20 @@ services:
       # WARNING: Wyoming protocol is UNAUTHENTICATED. Keep restricted to your internal LAN/Docker network.
       # - "10200:10200"
     volumes:
-      - ~/.cache/huggingface:/cache/huggingface
-      - ~/.cache/whisper:/cache/whisper
+      - ~/.cache/huggingface:/root/.cache/huggingface
       - ./voices:/app/voices
       # Optional: Mount SSL certificates directory (read-only)
       # - ./certs:/app/certs:ro
-    user: "1000:1000"
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
     environment:
       - PYTHONUNBUFFERED=1
-      - HF_HOME=/cache/huggingface
       - DEFAULT_VOICE=aelita
       # Home Assistant Wyoming Protocol Toggle:
-      # Set to 'true' to enable the Wyoming server (default: false).
+      # Set to 'true' to enable the Wyoming TTS server (default: false).
       # SECURITY WARNING: Wyoming protocol does NOT support authentication or API keys.
-      # Any client reaching port 10200 can synthesize audio and request transcription. Do NOT expose to public internet.
+      # Any client reaching port 10200 can synthesize audio. Do NOT expose to public internet.
       # - ENABLE_WYOMING=true
       # - WYOMING_PORT=10200
       # - WYOMING_HOST=0.0.0.0
-      # Whisper Speech-to-Text Settings:
-      - ENABLE_WHISPER=true
-      - WHISPER_MODEL=large-v3-turbo
-      - WHISPER_LANG=en
-      - WHISPER_MODELS_DIR=/cache/whisper
-      - WHISPER_THREADS=4
       # Optional: set API_KEY to require Bearer authentication on all /v1/* endpoints
       # - API_KEY=your-secret-key
       # Optional: configure CORS allowed origins (unset by default; set * or list origins)
@@ -50,6 +37,8 @@ services:
       # - SSL_CA_CERTS=/app/certs/ca.pem
       - NVIDIA_DRIVER_CAPABILITIES=all
       - NVIDIA_VISIBLE_DEVICES=all
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         reservations:
