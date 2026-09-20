@@ -3,6 +3,7 @@ FROM python:3.12-slim
 # Prevent interactive prompts during apt installs
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV LD_LIBRARY_PATH="/usr/local/lib/python3.12/site-packages"
 
 WORKDIR /app
 
@@ -13,11 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvulkan1 \
     libvulkan-dev \
     glslc \
+    glslang-tools \
+    spirv-headers \
+    spirv-tools \
     mesa-vulkan-drivers \
     vulkan-tools \
     curl \
     git \
     cmake \
+    ninja-build \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,26 +31,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir \
     https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35-vulkan/llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 
-# 3. Install PyTorch & NeuTTS dependencies with pinned torchao to prevent torchtune import errors
-RUN pip install --no-cache-dir \
-    "numpy<3" \
-    "torch" \
-    "torchao<0.18.0" \
-    "torchtune" \
-    "neucodec" \
-    "neutts[all]" \
-    "huggingface_hub>=0.20.0" \
-    fastapi \
-    uvicorn \
-    python-multipart \
-    soundfile \
-    pydantic \
-    "wyoming[zeroconf]>=1.5.0"
+# 3. Install PyTorch & torchaudio (CPU build without CUDA bloat) & NeuTTS dependencies with pinned torchao
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir \
+        "numpy<3" \
+        "torchao<0.18.0" \
+        "torchtune" \
+        "neucodec" \
+        "neutts[all]" \
+        "huggingface_hub>=0.20.0" \
+        fastapi \
+        uvicorn \
+        python-multipart \
+        soundfile \
+        pydantic \
+        "wyoming[zeroconf]>=1.5.0"
 
 # 4. Build and install pywhispercpp with native Vulkan acceleration
 RUN git clone --depth 1 --recursive https://github.com/absadiki/pywhispercpp.git /tmp/pywhispercpp \
     && cd /tmp/pywhispercpp \
-    && GGML_VULKAN=1 CMAKE_ARGS="-DGGML_VULKAN=1" pip install --no-cache-dir . \
+    && GGML_VULKAN=1 pip install --no-cache-dir . \
     && rm -rf /tmp/pywhispercpp
 
 # 5. Copy server application code and static web portal
