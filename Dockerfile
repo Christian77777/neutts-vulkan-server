@@ -11,9 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     espeak-ng \
     ffmpeg \
     libvulkan1 \
+    libvulkan-dev \
+    glslc \
     mesa-vulkan-drivers \
     vulkan-tools \
     curl \
+    git \
+    cmake \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,11 +28,13 @@ RUN pip install --no-cache-dir \
 
 # 3. Install PyTorch & NeuTTS dependencies with pinned torchao to prevent torchtune import errors
 RUN pip install --no-cache-dir \
+    "numpy<3" \
     "torch" \
     "torchao<0.18.0" \
     "torchtune" \
     "neucodec" \
     "neutts[all]" \
+    "huggingface_hub>=0.20.0" \
     fastapi \
     uvicorn \
     python-multipart \
@@ -36,12 +42,18 @@ RUN pip install --no-cache-dir \
     pydantic \
     "wyoming[zeroconf]>=1.5.0"
 
-# 4. Copy server application code and static web portal
+# 4. Build and install pywhispercpp with native Vulkan acceleration
+RUN git clone --depth 1 --recursive https://github.com/absadiki/pywhispercpp.git /tmp/pywhispercpp \
+    && cd /tmp/pywhispercpp \
+    && GGML_VULKAN=1 CMAKE_ARGS="-DGGML_VULKAN=1" pip install --no-cache-dir . \
+    && rm -rf /tmp/pywhispercpp
+
+# 5. Copy server application code and static web portal
 COPY openai_server.py cache_reference.py /app/
 COPY static/ /app/static/
 
-# 5. Create voices and certs directories and declare persistent volume
-RUN mkdir -p /app/voices /app/certs
+# 6. Create voices, certs, and whisper cache directories
+RUN mkdir -p /app/voices /app/certs /cache/whisper
 VOLUME ["/app/voices"]
 
 # Default environment configuration
@@ -53,6 +65,11 @@ ENV DEFAULT_VOICE=""
 ENV ENABLE_WYOMING=false
 ENV WYOMING_PORT=10200
 ENV WYOMING_HOST=0.0.0.0
+ENV ENABLE_WHISPER=true
+ENV WHISPER_MODEL=large-v3-turbo
+ENV WHISPER_LANG=en
+ENV WHISPER_MODELS_DIR=/cache/whisper
+ENV WHISPER_THREADS=4
 ENV SSL_KEYFILE=""
 ENV SSL_CERTFILE=""
 ENV SSL_KEYFILE_PASSWORD=""

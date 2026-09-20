@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     ports:
       - "8090:8090"
-      # Native Wyoming protocol port for Home Assistant
+      # Native Wyoming protocol port for Home Assistant (TTS + STT)
       - "10200:10200"
     devices:
       # Pass GPU hardware nodes (Intel Arc / AMD Radeon) into container
@@ -17,18 +17,32 @@ services:
       - "989"
     volumes:
       # Persist downloaded Hugging Face model weights on host
-      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.cache/huggingface:/cache/huggingface
+      # Persist downloaded Whisper STT models on host
+      - ~/.cache/whisper:/cache/whisper
       # Mount voices directory so new voices can be added without rebuilding
       - ./voices:/app/voices
       # Optional: Mount SSL certificates directory (read-only)
       # - ./certs:/app/certs:ro
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       - PYTHONUNBUFFERED=1
+      - HF_HOME=/cache/huggingface
       - DEFAULT_VOICE=aelita
       # Home Assistant Wyoming Protocol Toggle:
       - ENABLE_WYOMING=true
       - WYOMING_PORT=10200
       - WYOMING_HOST=0.0.0.0
+      # Whisper Speech-to-Text Settings:
+      - ENABLE_WHISPER=true
+      - WHISPER_MODEL=large-v3-turbo
+      - WHISPER_LANG=en
+      - WHISPER_MODELS_DIR=/cache/whisper
+      - WHISPER_THREADS=4
       # Optional: set API_KEY to require Bearer authentication on all /v1/* endpoints
       # - API_KEY=your-secret-key
       # Optional: configure CORS allowed origins (unset by default; set * or list origins)
@@ -43,8 +57,6 @@ services:
       # - VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json
       # For AMD GPUs on Debian, uncomment if needed:
       # - VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
-    security_opt:
-      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "curl -s -f -k http://localhost:8090/api/status || curl -s -f -k https://localhost:8090/api/status || exit 1"]
       interval: 20s
